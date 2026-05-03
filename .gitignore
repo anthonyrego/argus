@@ -1,0 +1,6 @@
+argus
+/bin/
+*.log
+*.jsonl
+config.yaml
+.DS_Store
