@@ -7,56 +7,36 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaultOpenAIBaseURL = "https://api.openai.com/v1"
-
+// Config holds runtime settings. Cameras themselves are stored in SQLite and
+// managed via the UI; only server-level knobs live here.
 type Config struct {
-	Camera CameraConfig `yaml:"camera"`
-	Vision VisionConfig `yaml:"vision"`
-	Agent  AgentConfig  `yaml:"agent"`
+	Server ServerConfig `yaml:"server"`
 }
 
-type CameraConfig struct {
-	RTSPURL string `yaml:"rtsp_url"`
-}
-
-type VisionConfig struct {
-	BaseURL string `yaml:"base_url"`
-	APIKey  string `yaml:"api_key"`
-	Model   string `yaml:"model"`
-	Prompt  string `yaml:"prompt"`
-}
-
-type AgentConfig struct {
-	IntervalSeconds  int    `yaml:"interval_seconds"`
-	ObservationsPath string `yaml:"observations_path"`
+type ServerConfig struct {
+	Addr     string `yaml:"addr"`      // e.g. ":8080" or "0.0.0.0:8080"
+	Database string `yaml:"database"`  // path to the SQLite file
 }
 
 func Load(path string) (*Config, error) {
+	c := &Config{
+		Server: ServerConfig{Addr: ":8080", Database: "argus.db"},
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return c, nil // defaults are fine for a fresh install
+		}
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-	var c Config
-	if err := yaml.Unmarshal(data, &c); err != nil {
+	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if c.Camera.RTSPURL == "" {
-		return nil, fmt.Errorf("camera.rtsp_url is required")
+	if c.Server.Addr == "" {
+		c.Server.Addr = ":8080"
 	}
-	if c.Vision.BaseURL == "" {
-		c.Vision.BaseURL = defaultOpenAIBaseURL
+	if c.Server.Database == "" {
+		c.Server.Database = "argus.db"
 	}
-	if c.Vision.APIKey == "" {
-		c.Vision.APIKey = os.Getenv("OPENAI_API_KEY")
-	}
-	if c.Vision.Model == "" {
-		return nil, fmt.Errorf("vision.model is required")
-	}
-	if c.Agent.IntervalSeconds <= 0 {
-		c.Agent.IntervalSeconds = 10
-	}
-	if c.Agent.ObservationsPath == "" {
-		c.Agent.ObservationsPath = "observations.jsonl"
-	}
-	return &c, nil
+	return c, nil
 }

@@ -2,24 +2,32 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/rego/argus/internal/agent"
-	"github.com/rego/argus/internal/camera"
 	"github.com/rego/argus/internal/config"
-	"github.com/rego/argus/internal/vision"
+	"github.com/rego/argus/internal/eventmgr"
+	"github.com/rego/argus/internal/server"
+	"github.com/rego/argus/internal/store"
+	"github.com/rego/argus/internal/streamer"
 )
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
+	debug := flag.Bool("debug", false, "verbose logging")
 	flag.Parse()
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	level := slog.LevelInfo
+	if *debug {
+		level = slog.LevelDebug
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -27,23 +35,47 @@ func main() {
 		os.Exit(1)
 	}
 
-	cam := camera.New(cfg.Camera.RTSPURL)
-	analyzer := vision.NewOpenAI(cfg.Vision.BaseURL, cfg.Vision.APIKey, cfg.Vision.Model)
-	a := agent.New(
-		cam,
-		analyzer,
-		cfg.Vision.Prompt,
-		time.Duration(cfg.Agent.IntervalSeconds)*time.Second,
-		cfg.Agent.ObservationsPath,
-		log,
-	)
+	st, err := store.Open(cfg.Server.Database)
+	if err != nil {
+		log.Error("open store", "err", err)
+		os.Exit(1)
+	}
+	defer st.Close()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	log.Info("argus starting", "interval_s", cfg.Agent.IntervalSeconds, "model", cfg.Vision.Model)
-	if err := a.Run(ctx); err != nil {
-		log.Error("agent stopped", "err", err)
+	mgr := eventmgr.New(ctx, st, log)
+	if err := mgr.Start(); err != nil {
+		log.Error("start event manager", "err", err)
+		os.Exit(1)
+	}
+	defer mgr.Close()
+
+	hls, err := streamer.New(ctx, st, log)
+	if err != nil {
+		log.Error("start streamer", "err", err)
+		os.Exit(1)
+	}
+	defer hls.Close()
+
+	srv := server.New(st, mgr, hls, server.Frontend(), log)
+	httpSrv := &http.Server{
+		Addr:              cfg.Server.Addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = httpSrv.Shutdown(shutdownCtx)
+	}()
+
+	log.Info("argus listening", "addr", cfg.Server.Addr, "db", cfg.Server.Database)
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error("http server", "err", err)
 		os.Exit(1)
 	}
 	log.Info("argus stopped cleanly")

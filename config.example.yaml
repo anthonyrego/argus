@@ -1,18 +1,6 @@
-camera:
-  rtsp_url: "rtsp://admin:CHANGEME@192.168.1.50:554/cam/realmonitor?channel=1&subtype=0"
+# argus only needs server-level settings here.
+# Cameras themselves are stored in SQLite and managed via the web UI.
 
-vision:
-  # Any OpenAI-compatible /chat/completions endpoint:
-  # OpenAI cloud:  https://api.openai.com/v1
-  # vLLM / LM Studio / llama.cpp / ollama (with /v1):  http://localhost:8888/v1
-  base_url: "http://localhost:8888/v1"
-  # Leave empty for local servers; falls back to $OPENAI_API_KEY for cloud.
-  api_key: ""
-  model: "gemma-4"
-  prompt: |
-    You are a security camera analyst. Describe what you see in this frame
-    in one or two sentences. Note any people, vehicles, or unusual activity.
-
-agent:
-  interval_seconds: 10
-  observations_path: "observations.jsonl"
+server:
+  addr: ":8080"
+  database: "argus.db"
