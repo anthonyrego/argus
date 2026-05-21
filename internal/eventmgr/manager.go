@@ -10,8 +10,23 @@ import (
 	"github.com/rego/argus/internal/store"
 )
 
+// EventSink receives every persisted event. Unlike the Subscribe channel it
+// is called synchronously and cannot drop, so use it for components that must
+// see every event (e.g. the clip recorder).
+type EventSink interface {
+	OnEvent(store.Event)
+}
+
+// CameraSyncer is told the current desired camera set whenever it changes.
+// Implemented by the recorder so it can start/stop per-camera ffmpegs in
+// lock-step with the event listeners.
+type CameraSyncer interface {
+	Sync(cams []store.Camera)
+}
+
 // Manager supervises one Dahua event listener per enabled camera. It persists
-// events to the store and fans them out to in-process subscribers (SSE).
+// events to the store and fans them out to in-process subscribers (SSE) and
+// to any registered sinks.
 type Manager struct {
 	store *store.Store
 	log   *slog.Logger
@@ -21,6 +36,8 @@ type Manager struct {
 
 	mu       sync.Mutex
 	runners  map[int64]*runner // camera_id -> running listener
+	sinks    []EventSink
+	syncers  []CameraSyncer
 	subsMu   sync.RWMutex
 	subs     map[int]chan store.Event
 	subsNext int
@@ -43,6 +60,22 @@ func New(ctx context.Context, s *store.Store, log *slog.Logger) *Manager {
 	}
 }
 
+// AddSink registers an EventSink to receive every persisted event.
+// Must be called before Start.
+func (m *Manager) AddSink(s EventSink) {
+	m.mu.Lock()
+	m.sinks = append(m.sinks, s)
+	m.mu.Unlock()
+}
+
+// AddSyncer registers a CameraSyncer to be notified on every camera change.
+// Must be called before Start.
+func (m *Manager) AddSyncer(s CameraSyncer) {
+	m.mu.Lock()
+	m.syncers = append(m.syncers, s)
+	m.mu.Unlock()
+}
+
 // Start launches a listener for every currently-enabled camera. Call once at
 // boot; subsequent camera changes must go through Sync.
 func (m *Manager) Start() error {
@@ -51,11 +84,15 @@ func (m *Manager) Start() error {
 		return err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for _, c := range cams {
 		if c.Enabled {
 			m.startLocked(c)
 		}
+	}
+	syncers := append([]CameraSyncer(nil), m.syncers...)
+	m.mu.Unlock()
+	for _, sy := range syncers {
+		sy.Sync(cams)
 	}
 	return nil
 }
@@ -76,7 +113,6 @@ func (m *Manager) Sync() {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Stop runners that are no longer wanted, or whose connection params changed.
 	for id, r := range m.runners {
@@ -91,6 +127,12 @@ func (m *Manager) Sync() {
 		if _, ok := m.runners[id]; !ok {
 			m.startLocked(c)
 		}
+	}
+	syncers := append([]CameraSyncer(nil), m.syncers...)
+	m.mu.Unlock()
+
+	for _, sy := range syncers {
+		sy.Sync(cams)
 	}
 }
 
@@ -128,7 +170,7 @@ func (m *Manager) startLocked(c store.Camera) {
 	go func() {
 		for ev := range ch {
 			stored := m.persist(c.ID, c.Name, ev)
-			m.broadcast(stored)
+			m.dispatch(stored)
 		}
 	}()
 
@@ -183,6 +225,18 @@ func (m *Manager) Subscribe() (<-chan store.Event, func()) {
 		}
 		m.subsMu.Unlock()
 	}
+}
+
+// dispatch fans out a persisted event to sinks (synchronous, no drops) and to
+// SSE subscribers (best-effort with drop on slow consumer).
+func (m *Manager) dispatch(e store.Event) {
+	m.mu.Lock()
+	sinks := append([]EventSink(nil), m.sinks...)
+	m.mu.Unlock()
+	for _, s := range sinks {
+		s.OnEvent(e)
+	}
+	m.broadcast(e)
 }
 
 func (m *Manager) broadcast(e store.Event) {

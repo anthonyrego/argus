@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
-import type { Camera, MotionEvent } from "../types";
+import { api, clipUrl } from "../api";
+import type { Camera, MotionEvent, Recording } from "../types";
 
 export default function Events() {
   const [events, setEvents] = useState<MotionEvent[]>([]);
   const [cams, setCams] = useState<Camera[]>([]);
   const [filterCam, setFilterCam] = useState<number | "">("");
   const [err, setErr] = useState<string | null>(null);
+  const [recs, setRecs] = useState<Record<number, Recording>>({});
 
   async function load() {
     try {
@@ -21,12 +22,29 @@ export default function Events() {
     }
   }
 
+  async function loadRecordings() {
+    try {
+      const list = await api.listRecordings({
+        limit: 200,
+        camera_id: filterCam || undefined,
+      });
+      const byEvent: Record<number, Recording> = {};
+      for (const r of list) {
+        if (r.event_id) byEvent[r.event_id] = r;
+      }
+      setRecs(byEvent);
+    } catch {
+      /* ignore */
+    }
+  }
+
   useEffect(() => {
     api.listCameras().then(setCams).catch(() => {});
   }, []);
 
   useEffect(() => {
     load();
+    loadRecordings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterCam]);
 
@@ -37,6 +55,10 @@ export default function Events() {
         const ev = JSON.parse((e as MessageEvent).data) as MotionEvent;
         if (!filterCam || ev.camera_id === filterCam) {
           setEvents((cur) => [ev, ...cur].slice(0, 500));
+          // A clip lands after pre+post-roll; poll once that window has passed.
+          if (ev.action.toLowerCase() === "start") {
+            setTimeout(loadRecordings, 12_000);
+          }
         }
       } catch {
         /* ignore */
@@ -73,11 +95,12 @@ export default function Events() {
               <th style={{ width: 160 }}>Camera</th>
               <th>Code</th>
               <th style={{ width: 80 }}>Action</th>
+              <th style={{ width: 70 }}>Clip</th>
               <th>Data</th>
             </tr>
           </thead>
           <tbody>
-            {events.map((e) => <EventRow key={e.id} ev={e} showCamera />)}
+            {events.map((e) => <EventRow key={e.id} ev={e} showCamera recording={recs[e.id]} />)}
           </tbody>
         </table>
       )}
@@ -85,7 +108,15 @@ export default function Events() {
   );
 }
 
-export function EventRow({ ev, showCamera }: { ev: MotionEvent; showCamera: boolean }) {
+export function EventRow({
+  ev,
+  showCamera,
+  recording,
+}: {
+  ev: MotionEvent;
+  showCamera: boolean;
+  recording?: Recording;
+}) {
   const time = useMemo(() => new Date(ev.occurred_at).toLocaleString(), [ev.occurred_at]);
   const action = ev.action.toLowerCase();
   return (
@@ -98,6 +129,15 @@ export function EventRow({ ev, showCamera }: { ev: MotionEvent; showCamera: bool
       )}
       <td><span className="badge code">{ev.code}</span></td>
       <td><span className={"badge " + action}>{ev.action}</span></td>
+      <td>
+        {recording ? (
+          <a href={clipUrl(recording.id)} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+            {(recording.duration_ms / 1000).toFixed(1)}s
+          </a>
+        ) : (
+          <span className="muted" style={{ fontSize: 11 }}>—</span>
+        )}
+      </td>
       <td className="muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11 }}>
         {ev.data_json && ev.data_json.length > 80
           ? ev.data_json.slice(0, 80) + "…"

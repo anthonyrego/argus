@@ -13,6 +13,7 @@ import (
 
 	"github.com/rego/argus/internal/config"
 	"github.com/rego/argus/internal/eventmgr"
+	"github.com/rego/argus/internal/recorder"
 	"github.com/rego/argus/internal/server"
 	"github.com/rego/argus/internal/store"
 	"github.com/rego/argus/internal/streamer"
@@ -46,6 +47,21 @@ func main() {
 	defer cancel()
 
 	mgr := eventmgr.New(ctx, st, log)
+
+	rec, err := recorder.New(ctx, st, log, recorder.Config{
+		Dir:      cfg.Recordings.Dir,
+		PreRoll:  time.Duration(cfg.Recordings.PreRollSec) * time.Second,
+		PostRoll: time.Duration(cfg.Recordings.PostRollSec) * time.Second,
+		MaxClip:  time.Duration(cfg.Recordings.MaxClipSec) * time.Second,
+	})
+	if err != nil {
+		log.Error("start recorder", "err", err)
+		os.Exit(1)
+	}
+	defer rec.Close()
+	mgr.AddSink(rec)
+	mgr.AddSyncer(rec)
+
 	if err := mgr.Start(); err != nil {
 		log.Error("start event manager", "err", err)
 		os.Exit(1)

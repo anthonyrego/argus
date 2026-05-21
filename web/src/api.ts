@@ -1,4 +1,4 @@
-import type { Camera, CameraInput, MotionEvent } from "./types";
+import type { Camera, CameraInput, MotionEvent, Recording } from "./types";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -42,9 +42,24 @@ export const api = {
     const qs = q.toString();
     return req<MotionEvent[]>(`/api/events${qs ? "?" + qs : ""}`);
   },
+  listRecordings: (params: {
+    camera_id?: number;
+    event_id?: number;
+    limit?: number;
+    before?: string;
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (params.camera_id) q.set("camera_id", String(params.camera_id));
+    if (params.event_id) q.set("event_id", String(params.event_id));
+    if (params.limit) q.set("limit", String(params.limit));
+    if (params.before) q.set("before", params.before);
+    const qs = q.toString();
+    return req<Recording[]>(`/api/recordings${qs ? "?" + qs : ""}`);
+  },
 };
 
 export const streamUrl = (cameraId: number) => `/api/cameras/${cameraId}/stream.mjpg`;
 export const hlsUrl = (cameraId: number) => `/api/cameras/${cameraId}/hls/index.m3u8`;
 export const snapshotUrl = (cameraId: number, cacheBust?: number) =>
   `/api/cameras/${cameraId}/snapshot.jpg${cacheBust ? `?t=${cacheBust}` : ""}`;
+export const clipUrl = (recordingId: number) => `/api/recordings/${recordingId}/clip.mp4`;

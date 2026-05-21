@@ -4,3 +4,14 @@
 server:
   addr: ":8080"
   database: "argus.db"
+
+# Motion-event clip recording. argus keeps a rolling pre-roll segmented from
+# each camera's main RTSP stream; when a Start event fires it concatenates
+# [now - pre_roll_sec, now + post_roll_sec] into a single MP4 under `dir`.
+# Repeated Starts during a clip extend the post-roll window, bounded by
+# max_clip_sec from the original trigger.
+recordings:
+  dir: "recordings"
+  pre_roll_sec: 5
+  post_roll_sec: 10
+  max_clip_sec: 30

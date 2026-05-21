@@ -25,3 +25,15 @@ export type MotionEvent = {
   data_json?: string;
   occurred_at: string;
 };
+
+export type Recording = {
+  id: number;
+  camera_id: number;
+  camera_name?: string;
+  event_id?: number;
+  started_at: string;
+  ended_at: string;
+  duration_ms: number;
+  size_bytes: number;
+  created_at: string;
+};

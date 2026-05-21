@@ -58,6 +58,8 @@ func (s *Server) Handler() http.Handler {
 		})
 		r.Get("/events", s.listEvents)
 		r.Get("/events/stream", s.eventStream)
+		r.Get("/recordings", s.listRecordings)
+		r.Get("/recordings/{id}/clip.mp4", s.recordingClip)
 	})
 
 	if s.frontend != nil {
@@ -277,6 +279,73 @@ func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// ---- recording handlers ----
+
+func (s *Server) listRecordings(w http.ResponseWriter, r *http.Request) {
+	f := store.ListRecordingsFilter{Limit: 100}
+	if v := r.URL.Query().Get("camera_id"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("camera_id: %w", err))
+			return
+		}
+		f.CameraID = id
+	}
+	if v := r.URL.Query().Get("event_id"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("event_id: %w", err))
+			return
+		}
+		f.EventID = id
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 || n > 500 {
+			writeErr(w, http.StatusBadRequest, errors.New("limit must be 1..500"))
+			return
+		}
+		f.Limit = n
+	}
+	if v := r.URL.Query().Get("before"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("before: %w", err))
+			return
+		}
+		f.Before = t
+	}
+	recs, err := s.store.ListRecordings(r.Context(), f)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if recs == nil {
+		recs = []store.Recording{}
+	}
+	writeJSON(w, http.StatusOK, recs)
+}
+
+func (s *Server) recordingClip(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	rec, err := s.store.GetRecording(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, rec.Path)
 }
 
 // ---- helpers ----

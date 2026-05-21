@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api, hlsUrl, streamUrl } from "../api";
-import type { Camera, MotionEvent } from "../types";
+import type { Camera, MotionEvent, Recording } from "../types";
 import { EventRow } from "./Events";
 import HlsPlayer from "../components/HlsPlayer";
 
@@ -12,13 +12,29 @@ export default function CameraDetail() {
   const camId = Number(id);
   const [cam, setCam] = useState<Camera | null>(null);
   const [events, setEvents] = useState<MotionEvent[]>([]);
+  const [recs, setRecs] = useState<Record<number, Recording>>({});
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("sub");
+
+  async function loadRecordings() {
+    try {
+      const list = await api.listRecordings({ camera_id: camId, limit: 100 });
+      const byEvent: Record<number, Recording> = {};
+      for (const r of list) {
+        if (r.event_id) byEvent[r.event_id] = r;
+      }
+      setRecs(byEvent);
+    } catch {
+      /* ignore */
+    }
+  }
 
   useEffect(() => {
     if (!camId) return;
     api.getCamera(camId).then(setCam).catch((e) => setErr(String(e.message)));
     api.listEvents({ camera_id: camId, limit: 50 }).then(setEvents).catch(() => {});
+    loadRecordings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camId]);
 
   useEffect(() => {
@@ -27,12 +43,17 @@ export default function CameraDetail() {
     es.addEventListener("motion", (e) => {
       try {
         const ev = JSON.parse((e as MessageEvent).data) as MotionEvent;
-        if (ev.camera_id === camId) setEvents((cur) => [ev, ...cur].slice(0, 50));
+        if (ev.camera_id !== camId) return;
+        setEvents((cur) => [ev, ...cur].slice(0, 50));
+        if (ev.action.toLowerCase() === "start") {
+          setTimeout(loadRecordings, 12_000);
+        }
       } catch {
         /* ignore */
       }
     });
     return () => es.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camId]);
 
   if (err) return <div className="error">{err}</div>;
@@ -79,7 +100,9 @@ export default function CameraDetail() {
           ) : (
             <table>
               <tbody>
-                {events.map((e) => <EventRow key={e.id} ev={e} showCamera={false} />)}
+                {events.map((e) => (
+                  <EventRow key={e.id} ev={e} showCamera={false} recording={recs[e.id]} />
+                ))}
               </tbody>
             </table>
           )}

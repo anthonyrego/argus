@@ -56,6 +56,19 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS events_camera_time ON events(camera_id, occurred_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS events_time ON events(occurred_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS recordings (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			camera_id    INTEGER NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
+			event_id     INTEGER REFERENCES events(id) ON DELETE SET NULL,
+			started_at   TEXT NOT NULL,
+			ended_at     TEXT NOT NULL,
+			duration_ms  INTEGER NOT NULL,
+			path         TEXT NOT NULL,
+			size_bytes   INTEGER NOT NULL DEFAULT 0,
+			created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS recordings_camera_time ON recordings(camera_id, started_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS recordings_event ON recordings(event_id)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
@@ -86,6 +99,20 @@ type Event struct {
 	ChannelIdx int       `json:"channel_idx"`
 	DataJSON   string    `json:"data_json,omitempty"`
 	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// Recording mirrors a row in the recordings table. Path is server-local.
+type Recording struct {
+	ID         int64     `json:"id"`
+	CameraID   int64     `json:"camera_id"`
+	CameraName string    `json:"camera_name,omitempty"`
+	EventID    int64     `json:"event_id,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+	EndedAt    time.Time `json:"ended_at"`
+	DurationMs int64     `json:"duration_ms"`
+	Path       string    `json:"-"`
+	SizeBytes  int64     `json:"size_bytes"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 var ErrNotFound = errors.New("not found")
@@ -236,6 +263,101 @@ func (s *Store) ListEvents(ctx context.Context, f ListEventsFilter) ([]Event, er
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// InsertRecording records a completed motion clip.
+func (s *Store) InsertRecording(ctx context.Context, r Recording) (Recording, error) {
+	var eventID any
+	if r.EventID > 0 {
+		eventID = r.EventID
+	}
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO recordings (camera_id, event_id, started_at, ended_at, duration_ms, path, size_bytes)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		r.CameraID, eventID,
+		r.StartedAt.UTC().Format(time.RFC3339Nano),
+		r.EndedAt.UTC().Format(time.RFC3339Nano),
+		r.DurationMs, r.Path, r.SizeBytes)
+	if err != nil {
+		return Recording{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return Recording{}, err
+	}
+	return s.GetRecording(ctx, id)
+}
+
+func (s *Store) GetRecording(ctx context.Context, id int64) (Recording, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT r.id, r.camera_id, c.name, COALESCE(r.event_id, 0),
+		       r.started_at, r.ended_at, r.duration_ms, r.path, r.size_bytes, r.created_at
+		FROM recordings r JOIN cameras c ON c.id = r.camera_id
+		WHERE r.id = ?`, id)
+	r, err := scanRecording(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Recording{}, ErrNotFound
+	}
+	return r, err
+}
+
+// ListRecordingsFilter narrows ListRecordings. Zero values are ignored.
+type ListRecordingsFilter struct {
+	CameraID int64
+	EventID  int64
+	Limit    int
+	Before   time.Time
+}
+
+func (s *Store) ListRecordings(ctx context.Context, f ListRecordingsFilter) ([]Recording, error) {
+	q := `SELECT r.id, r.camera_id, c.name, COALESCE(r.event_id, 0),
+	             r.started_at, r.ended_at, r.duration_ms, r.path, r.size_bytes, r.created_at
+		FROM recordings r JOIN cameras c ON c.id = r.camera_id WHERE 1=1`
+	var args []any
+	if f.CameraID > 0 {
+		q += " AND r.camera_id = ?"
+		args = append(args, f.CameraID)
+	}
+	if f.EventID > 0 {
+		q += " AND r.event_id = ?"
+		args = append(args, f.EventID)
+	}
+	if !f.Before.IsZero() {
+		q += " AND r.started_at < ?"
+		args = append(args, f.Before.UTC().Format(time.RFC3339Nano))
+	}
+	q += " ORDER BY r.started_at DESC, r.id DESC"
+	if f.Limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, f.Limit)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Recording
+	for rows.Next() {
+		r, err := scanRecording(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func scanRecording(r rowScanner) (Recording, error) {
+	var rec Recording
+	var started, ended, created string
+	if err := r.Scan(&rec.ID, &rec.CameraID, &rec.CameraName, &rec.EventID,
+		&started, &ended, &rec.DurationMs, &rec.Path, &rec.SizeBytes, &created); err != nil {
+		return Recording{}, err
+	}
+	rec.StartedAt, _ = time.Parse(time.RFC3339Nano, started)
+	rec.EndedAt, _ = time.Parse(time.RFC3339Nano, ended)
+	rec.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	return rec, nil
 }
 
 type rowScanner interface {
