@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, clipUrl } from "../api";
+import { api, clipUrl, eventStreamUrl } from "../api";
 import type { Camera, MotionEvent, Recording } from "../types";
 
 export default function Events() {
@@ -49,7 +49,7 @@ export default function Events() {
   }, [filterCam]);
 
   useEffect(() => {
-    const es = new EventSource("/api/events/stream");
+    const es = new EventSource(eventStreamUrl());
     es.addEventListener("motion", (e) => {
       try {
         const ev = JSON.parse((e as MessageEvent).data) as MotionEvent;

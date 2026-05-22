@@ -13,6 +13,7 @@ import (
 
 	"github.com/rego/argus/internal/config"
 	"github.com/rego/argus/internal/eventmgr"
+	"github.com/rego/argus/internal/notify/apns"
 	"github.com/rego/argus/internal/recorder"
 	"github.com/rego/argus/internal/server"
 	"github.com/rego/argus/internal/store"
@@ -61,6 +62,26 @@ func main() {
 	defer rec.Close()
 	mgr.AddSink(rec)
 	mgr.AddSyncer(rec)
+	rec.OnRecordingInserted = mgr.BroadcastRecording
+
+	if cfg.APNs.PushEnabled() {
+		pusher, err := apns.New(ctx, st, log, apns.Config{
+			TeamID:     cfg.APNs.TeamID,
+			KeyID:      cfg.APNs.KeyID,
+			KeyPath:    cfg.APNs.KeyPath,
+			BundleID:   cfg.APNs.BundleID,
+			Production: cfg.APNs.Environment == "production",
+		})
+		if err != nil {
+			log.Error("start apns sender", "err", err)
+			os.Exit(1)
+		}
+		defer pusher.Close()
+		rec.OnClipOpened = pusher.OnClipOpened
+		log.Info("apns push enabled", "bundle_id", cfg.APNs.BundleID, "env", cfg.APNs.Environment)
+	} else {
+		log.Info("apns push disabled (config incomplete)")
+	}
 
 	if err := mgr.Start(); err != nil {
 		log.Error("start event manager", "err", err)

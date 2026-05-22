@@ -1,10 +1,22 @@
+import { useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import Cameras from "./pages/Cameras";
 import CameraDetail from "./pages/CameraDetail";
 import Events from "./pages/Events";
+import Login from "./pages/Login";
+import ChangePassword from "./pages/ChangePassword";
+import PairDeviceModal from "./components/PairDeviceModal";
+import { clearToken, getMustChangePassword, getToken } from "./auth";
 
 export default function App() {
+  if (!getToken()) return <Login />;
+  if (getMustChangePassword()) return <ChangePassword />;
+  return <AppShell />;
+}
+
+function AppShell() {
+  const [pairOpen, setPairOpen] = useState(false);
   return (
     <div className="app">
       <header className="topbar">
@@ -25,7 +37,25 @@ export default function App() {
           <span className="live-dot" />
           local
         </span>
+        <button
+          onClick={() => setPairOpen(true)}
+          style={{ fontSize: 12, padding: "4px 10px" }}
+          title="Pair a phone with argus"
+        >
+          Pair phone
+        </button>
+        <button
+          onClick={() => {
+            clearToken();
+            window.location.reload();
+          }}
+          style={{ fontSize: 12, padding: "4px 10px" }}
+          title="Forget this browser's token"
+        >
+          Sign out
+        </button>
       </header>
+      {pairOpen && <PairDeviceModal onClose={() => setPairOpen(false)} />}
       <main>
         <Routes>
           <Route path="/" element={<Dashboard />} />

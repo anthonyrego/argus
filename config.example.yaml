@@ -5,6 +5,18 @@ server:
   addr: ":8080"
   database: "argus.db"
 
+# API auth is username + password. On first start the server seeds an admin
+# user with password "admin" and forces a change at first login.
+
+# Apple Push Notification service. Leave team_id empty to disable push.
+# key_path points at the .p8 auth key downloaded from Apple's developer portal.
+apns:
+  team_id: ""
+  key_id: ""
+  key_path: ""
+  bundle_id: ""
+  environment: "development"  # "development" (sandbox) or "production"
+
 # Motion-event clip recording. argus keeps a rolling pre-roll segmented from
 # each camera's main RTSP stream; when a Start event fires it concatenates
 # [now - pre_roll_sec, now + post_roll_sec] into a single MP4 under `dir`.

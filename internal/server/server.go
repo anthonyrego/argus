@@ -21,22 +21,26 @@ import (
 
 // Server wires the HTTP API and the embedded React SPA together.
 type Server struct {
-	store    *store.Store
-	mgr      *eventmgr.Manager
-	stream   *streamer.Streamer
-	log      *slog.Logger
-	frontend fs.FS // built React assets; nil falls back to a "frontend not built" message
-	proxy    *cameraProxy
+	store          *store.Store
+	mgr            *eventmgr.Manager
+	stream         *streamer.Streamer
+	log            *slog.Logger
+	frontend       fs.FS // built React assets; nil falls back to a "frontend not built" message
+	proxy          *cameraProxy
+	pairLimiter  *attemptLimiter
+	loginLimiter *attemptLimiter
 }
 
 func New(s *store.Store, m *eventmgr.Manager, st *streamer.Streamer, frontend fs.FS, log *slog.Logger) *Server {
 	return &Server{
-		store:    s,
-		mgr:      m,
-		stream:   st,
-		log:      log,
-		frontend: frontend,
-		proxy:    newCameraProxy(s, log),
+		store:        s,
+		mgr:          m,
+		stream:       st,
+		log:          log,
+		frontend:     frontend,
+		proxy:        newCameraProxy(s, log),
+		pairLimiter:  newAttemptLimiter(pairAttempts, pairWindow),
+		loginLimiter: newAttemptLimiter(10, 15*time.Minute),
 	}
 }
 
@@ -45,7 +49,19 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger(s.log))
 
+	// Unauthenticated, rate-limited entry points. Login mints a token for
+	// browsers; pair/complete consumes a 6-digit code for phones.
+	r.Post("/api/login", s.login)
+	r.Post("/api/pair/complete", s.completePairing)
+
 	r.Route("/api", func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Get("/devices", s.listDevices)
+		r.Put("/devices/me", s.updateMyDevice)
+		r.Delete("/devices/{id}", s.deleteDevice)
+		r.Post("/pair/start", s.startPairing)
+		r.Post("/admin/password", s.changeAdminPassword)
+
 		r.Get("/cameras", s.listCameras)
 		r.Post("/cameras", s.createCamera)
 		r.Route("/cameras/{id}", func(r chi.Router) {
@@ -252,6 +268,8 @@ func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
 
 	ch, cancel := s.mgr.Subscribe()
 	defer cancel()
+	recCh, cancelRec := s.mgr.SubscribeRecordings()
+	defer cancelRec()
 
 	// Initial comment so the client sees a 200 immediately.
 	_, _ = w.Write([]byte(": connected\n\n"))
@@ -276,6 +294,16 @@ func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			fmt.Fprintf(w, "event: motion\ndata: %s\n\n", b)
+			flusher.Flush()
+		case rec, ok := <-recCh:
+			if !ok {
+				return
+			}
+			b, err := json.Marshal(rec)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: recording\ndata: %s\n\n", b)
 			flusher.Flush()
 		}
 	}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, hlsUrl, streamUrl } from "../api";
+import { api, eventStreamUrl, hlsUrl, streamUrl } from "../api";
 import type { Camera, MotionEvent, Recording } from "../types";
 import { EventRow } from "./Events";
 import HlsPlayer from "../components/HlsPlayer";
@@ -39,7 +39,7 @@ export default function CameraDetail() {
 
   useEffect(() => {
     if (!camId) return;
-    const es = new EventSource("/api/events/stream");
+    const es = new EventSource(eventStreamUrl());
     es.addEventListener("motion", (e) => {
       try {
         const ev = JSON.parse((e as MessageEvent).data) as MotionEvent;

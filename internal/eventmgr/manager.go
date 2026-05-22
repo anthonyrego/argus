@@ -40,6 +40,7 @@ type Manager struct {
 	syncers  []CameraSyncer
 	subsMu   sync.RWMutex
 	subs     map[int]chan store.Event
+	recSubs  map[int]chan store.Recording
 	subsNext int
 }
 
@@ -57,6 +58,7 @@ func New(ctx context.Context, s *store.Store, log *slog.Logger) *Manager {
 		cancel:  cancel,
 		runners: make(map[int64]*runner),
 		subs:    make(map[int]chan store.Event),
+		recSubs: make(map[int]chan store.Recording),
 	}
 }
 
@@ -224,6 +226,38 @@ func (m *Manager) Subscribe() (<-chan store.Event, func()) {
 			close(c)
 		}
 		m.subsMu.Unlock()
+	}
+}
+
+// SubscribeRecordings returns a buffered channel that receives every recording
+// inserted after the call. Same semantics as Subscribe.
+func (m *Manager) SubscribeRecordings() (<-chan store.Recording, func()) {
+	ch := make(chan store.Recording, 32)
+	m.subsMu.Lock()
+	id := m.subsNext
+	m.subsNext++
+	m.recSubs[id] = ch
+	m.subsMu.Unlock()
+	return ch, func() {
+		m.subsMu.Lock()
+		if c, ok := m.recSubs[id]; ok {
+			delete(m.recSubs, id)
+			close(c)
+		}
+		m.subsMu.Unlock()
+	}
+}
+
+// BroadcastRecording fans a newly-inserted recording out to SSE subscribers.
+// Wired from the recorder's OnRecordingInserted hook.
+func (m *Manager) BroadcastRecording(rec store.Recording) {
+	m.subsMu.RLock()
+	defer m.subsMu.RUnlock()
+	for _, ch := range m.recSubs {
+		select {
+		case ch <- rec:
+		default:
+		}
 	}
 }
 

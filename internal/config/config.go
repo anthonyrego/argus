@@ -11,12 +11,22 @@ import (
 // managed via the UI; only server-level knobs live here.
 type Config struct {
 	Server     ServerConfig     `yaml:"server"`
+	APNs       APNsConfig       `yaml:"apns"`
 	Recordings RecordingsConfig `yaml:"recordings"`
 }
 
 type ServerConfig struct {
 	Addr     string `yaml:"addr"`      // e.g. ":8080" or "0.0.0.0:8080"
 	Database string `yaml:"database"`  // path to the SQLite file
+}
+
+// APNsConfig holds Apple Push credentials. An empty TeamID disables push.
+type APNsConfig struct {
+	TeamID      string `yaml:"team_id"`
+	KeyID       string `yaml:"key_id"`
+	KeyPath     string `yaml:"key_path"`     // path to the .p8 file
+	BundleID    string `yaml:"bundle_id"`    // e.g. ai.getaide.argus
+	Environment string `yaml:"environment"`  // "development" (default) or "production"
 }
 
 // RecordingsConfig controls the motion-event clip recorder. PreRollSec is the
@@ -67,5 +77,13 @@ func Load(path string) (*Config, error) {
 	if c.Recordings.MaxClipSec <= 0 {
 		c.Recordings.MaxClipSec = 30
 	}
+	if c.APNs.Environment == "" {
+		c.APNs.Environment = "development"
+	}
 	return c, nil
+}
+
+// PushEnabled reports whether APNs is fully configured.
+func (c APNsConfig) PushEnabled() bool {
+	return c.TeamID != "" && c.KeyID != "" && c.KeyPath != "" && c.BundleID != ""
 }

@@ -59,6 +59,16 @@ type Recorder struct {
 
 	mu       sync.Mutex
 	sessions map[int64]*camSession
+
+	// OnClipOpened, if non-nil, is invoked exactly once each time a new clip is
+	// created (i.e. on the trigger event that opens it, not on subsequent Starts
+	// that extend it). Used by the push notifier so one push fires per clip.
+	OnClipOpened func(store.Event)
+
+	// OnRecordingInserted, if non-nil, is invoked after a clip has been fully
+	// written and its row inserted into the store. Used by the SSE bridge so
+	// clients learn the recording is now playable.
+	OnRecordingInserted func(store.Recording)
 }
 
 func New(ctx context.Context, s *store.Store, log *slog.Logger, cfg Config) (*Recorder, error) {
@@ -392,6 +402,9 @@ func (s *camSession) trigger(ev store.Event) {
 		"camera_id", s.cameraID, "camera", s.name,
 		"code", ev.Code, "event_id", ev.ID,
 		"trigger_at", triggerTime, "deadline", s.active.deadline)
+	if hook := s.rec.OnClipOpened; hook != nil {
+		go hook(ev)
+	}
 }
 
 // maybeFinalize finalizes the active clip if (a) the deadline has passed AND
@@ -519,6 +532,10 @@ func (s *camSession) finalizeClip(clip activeClip, segs []segmentInfo) {
 		"camera_id", s.cameraID, "event_id", clip.triggerEventID,
 		"recording_id", rec.ID, "path", outPath,
 		"segments", len(segs), "size_bytes", info.Size())
+	if hook := s.rec.OnRecordingInserted; hook != nil {
+		rec.CameraName = s.name
+		go hook(rec)
+	}
 }
 
 // prune removes segments older than what the pre-roll could possibly need,
