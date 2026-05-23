@@ -156,6 +156,10 @@ func (st *Streamer) startSession(cam store.Camera, hash string) (*session, error
 	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-loglevel", "warning",
 		"-rtsp_transport", "tcp",
+		// Regenerate PTS and ignore source DTS — Dahua's RTSP feed occasionally
+		// emits packets whose DTS jumps backwards, which causes the HLS muxer
+		// to flatten timestamps and produce visible playback hitches.
+		"-fflags", "+genpts+igndts",
 		"-i", rtspURL,
 		"-an",
 		"-c:v", "copy",
