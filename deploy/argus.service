@@ -1,0 +1,22 @@
+[Unit]
+Description=argus NVR
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=argus
+Group=argus
+ExecStart=/usr/local/bin/argus -config /etc/argus/config.yaml
+WorkingDirectory=/var/lib/argus
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/argus
+
+[Install]
+WantedBy=multi-user.target
