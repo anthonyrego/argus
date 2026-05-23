@@ -48,7 +48,7 @@ if [[ "$enable_https" == "1" ]]; then
 else
   echo "[argus] starting vite on :5173 (open http://localhost:5173)"
 fi
-(cd web && npm run dev) &
+(cd web && npm run dev --host) &
 pids+=($!)
 
 wait
