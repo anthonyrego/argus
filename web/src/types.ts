@@ -15,6 +15,11 @@ export type CameraInput = {
   enabled: boolean;
 };
 
+export type AppSettings = {
+  recording_enabled: boolean;
+  notifications_enabled: boolean;
+};
+
 export type MotionEvent = {
   id: number;
   camera_id: number;

@@ -112,6 +112,11 @@ func (s *Sender) worker() {
 }
 
 func (s *Sender) fanOut(ev store.Event) {
+	// Global "home mode": skip the push when notifications are switched off.
+	// Fail open on a read error so a DB hiccup doesn't silently mute alerts.
+	if st, err := s.store.GetSettings(s.ctx); err == nil && !st.NotificationsEnabled {
+		return
+	}
 	targets, err := s.store.ListPushTargets(s.ctx)
 	if err != nil {
 		s.log.Error("apns: list push targets", "err", err)

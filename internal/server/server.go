@@ -62,6 +62,9 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/pair/start", s.startPairing)
 		r.Post("/admin/password", s.changeAdminPassword)
 
+		r.Get("/settings", s.getSettings)
+		r.Put("/settings", s.updateSettings)
+
 		r.Get("/cameras", s.listCameras)
 		r.Post("/cameras", s.createCamera)
 		r.Route("/cameras/{id}", func(r chi.Router) {
@@ -211,6 +214,33 @@ func (s *Server) deleteCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mgr.Sync()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---- settings handlers ----
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	st, err := s.store.GetSettings(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// updateSettings replaces both global switches. Clients send the full object;
+// an omitted field decodes to false, so the web/iOS toggles always submit both.
+func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
+	var st store.Settings
+	if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	out, err := s.store.UpdateSettings(r.Context(), st)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ---- event handlers ----

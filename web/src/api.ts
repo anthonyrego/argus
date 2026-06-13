@@ -1,4 +1,4 @@
-import type { Camera, CameraInput, MotionEvent, Recording } from "./types";
+import type { AppSettings, Camera, CameraInput, MotionEvent, Recording } from "./types";
 import { clearToken, getToken, withTokenParam } from "./auth";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -72,6 +72,9 @@ export const api = {
     const qs = q.toString();
     return req<Recording[]>(`/api/recordings${qs ? "?" + qs : ""}`);
   },
+  getSettings: () => req<AppSettings>("/api/settings"),
+  updateSettings: (s: AppSettings) =>
+    req<AppSettings>("/api/settings", { method: "PUT", body: JSON.stringify(s) }),
 };
 
 // login exchanges admin credentials for a per-session API token. The server

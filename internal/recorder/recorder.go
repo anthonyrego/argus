@@ -154,6 +154,12 @@ func (r *Recorder) OnEvent(eventStored store.Event) {
 	if !strings.EqualFold(eventStored.Action, "Start") {
 		return
 	}
+	// Global "home mode": when recording is switched off we leave the segmenter
+	// running (so re-enabling is instant with full pre-roll) but don't open or
+	// extend any clip. Fail open on a read error — don't silently stop recording.
+	if st, err := r.store.GetSettings(r.ctx); err == nil && !st.RecordingEnabled {
+		return
+	}
 	r.mu.Lock()
 	sess, ok := r.sessions[eventStored.CameraID]
 	r.mu.Unlock()

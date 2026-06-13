@@ -59,6 +59,17 @@ struct Recording: Codable, Identifiable, Hashable {
     }
 }
 
+// AppSettings mirrors the server's global "home mode" switches.
+struct AppSettings: Codable, Equatable {
+    var recordingEnabled: Bool
+    var notificationsEnabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case recordingEnabled = "recording_enabled"
+        case notificationsEnabled = "notifications_enabled"
+    }
+}
+
 struct RegisteredDevice: Codable {
     let id: Int64
     let platform: String

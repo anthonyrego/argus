@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import Cameras from "./pages/Cameras";
 import CameraDetail from "./pages/CameraDetail";
 import Events from "./pages/Events";
+import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import ChangePassword from "./pages/ChangePassword";
 import PairDeviceModal from "./components/PairDeviceModal";
+import { api } from "./api";
+import type { AppSettings } from "./types";
 import { clearToken, getMustChangePassword, getToken } from "./auth";
 
 export default function App() {
@@ -17,6 +20,15 @@ export default function App() {
 
 function AppShell() {
   const [pairOpen, setPairOpen] = useState(false);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+
+  useEffect(() => {
+    api.getSettings().then(setSettings).catch(() => {});
+  }, []);
+
+  const muted =
+    settings && (!settings.recording_enabled || !settings.notifications_enabled);
+
   return (
     <div className="app">
       <header className="topbar">
@@ -31,8 +43,16 @@ function AppShell() {
           <NavLink to="/events" className={({ isActive }) => (isActive ? "active" : "")}>
             Events
           </NavLink>
+          <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : "")}>
+            Settings
+          </NavLink>
         </nav>
         <div className="spacer" />
+        {muted && (
+          <NavLink to="/settings" className="badge pulse" style={{ textDecoration: "none" }}>
+            home mode
+          </NavLink>
+        )}
         <span className="muted" style={{ fontSize: 12 }}>
           <span className="live-dot" />
           local
@@ -62,6 +82,10 @@ function AppShell() {
           <Route path="/cameras" element={<Cameras />} />
           <Route path="/cameras/:id" element={<CameraDetail />} />
           <Route path="/events" element={<Events />} />
+          <Route
+            path="/settings"
+            element={<Settings settings={settings} onChange={setSettings} />}
+          />
         </Routes>
       </main>
     </div>

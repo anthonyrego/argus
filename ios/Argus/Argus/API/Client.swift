@@ -122,6 +122,16 @@ struct APIClient {
         let body = try JSONEncoder().encode(Body(apns_token: apns))
         try await sendVoid(request("/api/devices/me", method: "PUT", body: body))
     }
+
+    func getSettings() async throws -> AppSettings {
+        try await send(request("/api/settings"))
+    }
+
+    // updateSettings replaces both global switches and returns the stored values.
+    func updateSettings(_ settings: AppSettings) async throws -> AppSettings {
+        let body = try JSONEncoder().encode(settings)
+        return try await send(request("/api/settings", method: "PUT", body: body))
+    }
 }
 
 enum APIError: Error, LocalizedError {

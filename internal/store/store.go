@@ -98,6 +98,14 @@ func (s *Store) migrate() error {
 			must_change_password  INTEGER NOT NULL DEFAULT 0,
 			updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
 		)`,
+		// Single-row table holding the global recording/notification switches
+		// ("home mode"). Both default on, preserving prior behavior.
+		`CREATE TABLE IF NOT EXISTS app_settings (
+			id                     INTEGER PRIMARY KEY CHECK (id = 1),
+			recording_enabled      INTEGER NOT NULL DEFAULT 1,
+			notifications_enabled  INTEGER NOT NULL DEFAULT 1
+		)`,
+		`INSERT OR IGNORE INTO app_settings (id, recording_enabled, notifications_enabled) VALUES (1, 1, 1)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
@@ -116,6 +124,14 @@ type Camera struct {
 	Password  string    `json:"-"` // never returned in JSON
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// Settings holds the global "home mode" switches. Both gate work that happens
+// downstream of an event (recording a clip, sending a push) without affecting
+// the live event stream or HLS view.
+type Settings struct {
+	RecordingEnabled     bool `json:"recording_enabled"`
+	NotificationsEnabled bool `json:"notifications_enabled"`
 }
 
 // Event mirrors a row in the events table.
@@ -145,6 +161,32 @@ type Recording struct {
 }
 
 var ErrNotFound = errors.New("not found")
+
+// GetSettings returns the global switches. The row is seeded by migrate(), so a
+// missing row is treated as "everything on" rather than an error.
+func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT recording_enabled, notifications_enabled FROM app_settings WHERE id = 1`)
+	var rec, notif int
+	if err := row.Scan(&rec, &notif); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Settings{RecordingEnabled: true, NotificationsEnabled: true}, nil
+		}
+		return Settings{}, err
+	}
+	return Settings{RecordingEnabled: rec != 0, NotificationsEnabled: notif != 0}, nil
+}
+
+// UpdateSettings replaces both switches and returns the stored values.
+func (s *Store) UpdateSettings(ctx context.Context, st Settings) (Settings, error) {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE app_settings SET recording_enabled = ?, notifications_enabled = ? WHERE id = 1`,
+		boolToInt(st.RecordingEnabled), boolToInt(st.NotificationsEnabled))
+	if err != nil {
+		return Settings{}, err
+	}
+	return s.GetSettings(ctx)
+}
 
 func (s *Store) ListCameras(ctx context.Context) ([]Camera, error) {
 	rows, err := s.db.QueryContext(ctx, `
